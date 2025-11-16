@@ -28,6 +28,9 @@ import { Slider } from "@/components/ui/slider"
 import { Input } from "@/components/ui/input"
 import { useProducts } from "@/hooks/useProducts"
 import { useCategories } from "@/hooks/useCategories"
+import { useAddToCart } from "@/hooks/useCart"
+import { useAddToWishlist } from "@/hooks/useWishlist"
+import { useToast } from "@/hooks/use-toast"
 
 export default function CatalogPage() {
   const [, params] = useRoute("/catalog")
@@ -57,6 +60,10 @@ export default function CatalogPage() {
     page: currentPage,
     limit: 12,
   })
+
+  const addToCart = useAddToCart()
+  const addToWishlist = useAddToWishlist()
+  const { toast } = useToast()
 
   const categories = categoriesData || []
   const products = productsData?.products || []
@@ -121,6 +128,38 @@ export default function CatalogPage() {
 
   const handlePageChange = (page: number) => {
     updateURL({ page })
+  }
+
+  const handleAddToCart = async (productId: string) => {
+    try {
+      await addToCart.mutateAsync({ productId, quantity: 1 })
+      toast({
+        title: "Добавлено в корзину",
+        description: "Товар успешно добавлен в корзину",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Ошибка",
+        description: error.message || "Не удалось добавить товар в корзину",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleAddToWishlist = async (productId: string) => {
+    try {
+      await addToWishlist.mutateAsync(productId)
+      toast({
+        title: "Добавлено в избранное",
+        description: "Товар добавлен в избранное",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Ошибка",
+        description: error.message || "Не удалось добавить товар в избранное",
+        variant: "destructive",
+      })
+    }
   }
 
   const FilterContent = () => (
@@ -288,7 +327,12 @@ export default function CatalogPage() {
                 <>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
                     {products.map((product: any) => (
-                      <ProductCard key={product.id} product={product} />
+                      <ProductCard 
+                        key={product.id} 
+                        product={product}
+                        onAddToCart={handleAddToCart}
+                        onAddToWishlist={handleAddToWishlist}
+                      />
                     ))}
                   </div>
 

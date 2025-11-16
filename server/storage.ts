@@ -47,7 +47,7 @@ import {
   supportMessages,
   supportMessageAttachments,
 } from "@shared/schema";
-import { eq, and, desc, sql, like, gte, lte, or } from "drizzle-orm";
+import { eq, and, desc, sql, like, gte, lte, or, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -289,7 +289,29 @@ export class DatabaseStorage implements IStorage {
 
     const productsResult = await query;
     
-    return { products: productsResult, total };
+    if (productsResult.length === 0) {
+      return { products: [], total };
+    }
+    
+    const productIds = productsResult.map((p: Product) => p.id);
+    const allImages = await db
+      .select()
+      .from(productImages)
+      .where(inArray(productImages.productId, productIds))
+      .orderBy(productImages.sortOrder);
+    
+    const imagesByProductId = allImages.reduce((acc, img) => {
+      if (!acc[img.productId]) acc[img.productId] = [];
+      acc[img.productId].push(img);
+      return acc;
+    }, {} as Record<string, typeof allImages>);
+    
+    const productsWithImages = productsResult.map((product: Product) => ({
+      ...product,
+      images: imagesByProductId[product.id] || [],
+    }));
+    
+    return { products: productsWithImages, total };
   }
 
   async getProduct(id: string): Promise<Product | undefined> {
@@ -489,9 +511,39 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(products, eq(cartItems.productId, products.id))
       .where(eq(cartItems.userId, userId));
     
-    // Normalize: leftJoin can return { id: null, ... } instead of null
-    // Also ensure decimal fields are strings (Drizzle returns Decimal objects)
-    return items.map(item => ({
+    if (items.length === 0) {
+      return [];
+    }
+    
+    const productIds = items
+      .map((item) => item.product?.id)
+      .filter((id): id is string => !!id);
+    
+    if (productIds.length === 0) {
+      return items.map(item => ({
+        id: item.id,
+        userId: item.userId,
+        productId: item.productId,
+        quantity: item.quantity,
+        addedAt: item.addedAt,
+        updatedAt: item.updatedAt,
+        product: null,
+      })) as CartItemWithProduct[];
+    }
+    
+    const allImages = await db
+      .select()
+      .from(productImages)
+      .where(inArray(productImages.productId, productIds))
+      .orderBy(productImages.sortOrder);
+    
+    const imagesByProductId = allImages.reduce((acc, img) => {
+      if (!acc[img.productId]) acc[img.productId] = [];
+      acc[img.productId].push(img);
+      return acc;
+    }, {} as Record<string, typeof allImages>);
+    
+    return items.map((item) => ({
       id: item.id,
       userId: item.userId,
       productId: item.productId,
@@ -508,6 +560,7 @@ export class DatabaseStorage implements IStorage {
         dimensionsHeight: item.product.dimensionsHeight?.toString() || null,
         dimensionsLength: item.product.dimensionsLength?.toString() || null,
         dimensionsWidth: item.product.dimensionsWidth?.toString() || null,
+        images: imagesByProductId[item.product.id] || [],
       } : null,
     })) as CartItemWithProduct[];
   }
@@ -558,7 +611,54 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWishlistItems(userId: string): Promise<WishlistItem[]> {
-    return db.select().from(wishlistItems).where(eq(wishlistItems.userId, userId));
+    const items = await db
+      .select()
+      .from(wishlistItems)
+      .where(eq(wishlistItems.userId, userId));
+    
+    if (items.length === 0) {
+      return [];
+    }
+    
+    const uniqueProductIds = Array.from(new Set(items.map((item) => item.productId)));
+    const productsData = await db
+      .select()
+      .from(products)
+      .where(inArray(products.id, uniqueProductIds));
+    
+    const allImages = await db
+      .select()
+      .from(productImages)
+      .where(inArray(productImages.productId, uniqueProductIds))
+      .orderBy(productImages.sortOrder);
+    
+    const imagesByProductId = allImages.reduce((acc, img) => {
+      if (!acc[img.productId]) acc[img.productId] = [];
+      acc[img.productId].push(img);
+      return acc;
+    }, {} as Record<string, typeof allImages>);
+    
+    const productById = productsData.reduce((acc, p) => {
+      acc[p.id] = {
+        ...p,
+        price: p.price?.toString() || "0",
+        discountPercentage: p.discountPercentage?.toString() || "0",
+        rating: p.rating?.toString() || "0",
+        weight: p.weight?.toString() || null,
+        volume: p.volume?.toString() || null,
+        dimensionsHeight: p.dimensionsHeight?.toString() || null,
+        dimensionsLength: p.dimensionsLength?.toString() || null,
+        dimensionsWidth: p.dimensionsWidth?.toString() || null,
+      };
+      return acc;
+    }, {} as Record<string, any>);
+    
+    return items.map((item) => ({
+      ...item,
+      product: productById[item.productId] 
+        ? { ...productById[item.productId], images: imagesByProductId[item.productId] || [] }
+        : undefined,
+    })) as any;
   }
 
   async addWishlistItem(item: InsertWishlistItem): Promise<WishlistItem> {
@@ -573,7 +673,54 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getComparisonItems(userId: string): Promise<ComparisonItem[]> {
-    return db.select().from(comparisonItems).where(eq(comparisonItems.userId, userId));
+    const items = await db
+      .select()
+      .from(comparisonItems)
+      .where(eq(comparisonItems.userId, userId));
+    
+    if (items.length === 0) {
+      return [];
+    }
+    
+    const uniqueProductIds = Array.from(new Set(items.map((item) => item.productId)));
+    const productsData = await db
+      .select()
+      .from(products)
+      .where(inArray(products.id, uniqueProductIds));
+    
+    const allImages = await db
+      .select()
+      .from(productImages)
+      .where(inArray(productImages.productId, uniqueProductIds))
+      .orderBy(productImages.sortOrder);
+    
+    const imagesByProductId = allImages.reduce((acc, img) => {
+      if (!acc[img.productId]) acc[img.productId] = [];
+      acc[img.productId].push(img);
+      return acc;
+    }, {} as Record<string, typeof allImages>);
+    
+    const productById = productsData.reduce((acc, p) => {
+      acc[p.id] = {
+        ...p,
+        price: p.price?.toString() || "0",
+        discountPercentage: p.discountPercentage?.toString() || "0",
+        rating: p.rating?.toString() || "0",
+        weight: p.weight?.toString() || null,
+        volume: p.volume?.toString() || null,
+        dimensionsHeight: p.dimensionsHeight?.toString() || null,
+        dimensionsLength: p.dimensionsLength?.toString() || null,
+        dimensionsWidth: p.dimensionsWidth?.toString() || null,
+      };
+      return acc;
+    }, {} as Record<string, any>);
+    
+    return items.map((item) => ({
+      ...item,
+      product: productById[item.productId]
+        ? { ...productById[item.productId], images: imagesByProductId[item.productId] || [] }
+        : undefined,
+    })) as any;
   }
 
   async addComparisonItem(item: InsertComparisonItem): Promise<ComparisonItem> {
