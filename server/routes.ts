@@ -1,0 +1,1007 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
+import { storage } from "./storage";
+import {
+  generateToken,
+  hashPassword,
+  comparePassword,
+  authenticateToken,
+  requireRole,
+} from "./auth";
+import {
+  generateVerificationToken,
+  sendVerificationEmail,
+} from "./email";
+import {
+  productImagesUpload,
+  chatAttachmentsUpload,
+  validateTotalFileSize,
+} from "./upload";
+import { calculateCashback, canUseBonuses } from "./bonuses";
+import { validatePromocode, applyPromocode } from "./promocodes";
+import {
+  registerSchema,
+  loginSchema,
+  createOrderSchema,
+} from "@shared/schema";
+import { z } from "zod";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+
+  wss.on("connection", async (ws: any, req: any) => {
+    const token = new URL(req.url!, `http://${req.headers.host}`).searchParams.get("token");
+    
+    if (!token) {
+      ws.close(1008, "Требуется токен аутентификации");
+      return;
+    }
+
+    const { verifyToken } = await import("./auth");
+    const payload = verifyToken(token);
+    
+    if (!payload) {
+      ws.close(1008, "Недействительный токен");
+      return;
+    }
+
+    const userId = payload.userId;
+    
+    ws.on("message", async (data: any) => {
+      try {
+        const message = JSON.parse(data.toString());
+        
+        if (message.type === "chat_message") {
+          const supportMessage = await storage.createSupportMessage({
+            userId,
+            senderId: userId,
+            messageText: message.text,
+          });
+
+          wss.clients.forEach((client: any) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: "new_message",
+                message: supportMessage,
+              }));
+            }
+          });
+        }
+      } catch (error) {
+        console.error("WebSocket message error:", error);
+      }
+    });
+  });
+
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const data = registerSchema.parse(req.body);
+
+      const existingUser = await storage.getUserByEmail(data.email);
+      if (existingUser) {
+        return res.status(400).json({ message: "Email уже зарегистрирован" });
+      }
+
+      const passwordHash = await hashPassword(data.password);
+      const verificationToken = generateVerificationToken();
+      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const user = await storage.createUser({
+        email: data.email,
+        passwordHash,
+        firstName: data.firstName,
+        lastName: data.lastName || null,
+        patronymic: data.patronymic || null,
+        phone: data.phone,
+      });
+
+      await storage.updateUser(user.id, {
+        verificationToken,
+        verificationTokenExpires,
+      });
+
+      await storage.addUserRole({
+        userId: user.id,
+        role: "customer",
+      });
+
+      await sendVerificationEmail(user.email, verificationToken, user.firstName);
+
+      const token = generateToken(user.id);
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          isVerified: user.isVerified,
+          bonusBalance: user.bonusBalance,
+        },
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка регистрации" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const data = loginSchema.parse(req.body);
+
+      const user = await storage.getUserByEmail(data.email);
+      if (!user) {
+        return res.status(401).json({ message: "Неверный email или пароль" });
+      }
+
+      const isValidPassword = await comparePassword(data.password, user.passwordHash);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Неверный email или пароль" });
+      }
+
+      const token = generateToken(user.id);
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          isVerified: user.isVerified,
+          bonusBalance: user.bonusBalance,
+        },
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка входа" });
+    }
+  });
+
+  app.get("/api/auth/verify-email", async (req, res) => {
+    try {
+      const { token } = req.query;
+
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ message: "Токен не указан" });
+      }
+
+      const { db } = await import("./db");
+      const { users } = await import("@shared/schema");
+      const { eq, and, gt } = await import("drizzle-orm");
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.verificationToken, token),
+            gt(users.verificationTokenExpires, new Date())
+          )
+        )
+        .limit(1);
+
+      if (!user) {
+        return res.status(400).json({ message: "Недействительный или истёкший токен" });
+      }
+
+      await storage.updateUser(user.id, {
+        isVerified: true,
+        verificationToken: null,
+        verificationTokenExpires: null,
+      });
+
+      res.json({ message: "Email успешно подтверждён" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка верификации email" });
+    }
+  });
+
+  app.get("/api/auth/me", authenticateToken, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      const roles = await storage.getUserRoles(user.id);
+      const roleNames = roles.map(r => r.role);
+
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        patronymic: user.patronymic,
+        phone: user.phone,
+        isVerified: user.isVerified,
+        bonusBalance: user.bonusBalance,
+        roles: roleNames,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения профиля" });
+    }
+  });
+
+  app.put("/api/auth/profile", authenticateToken, async (req, res) => {
+    try {
+      const profileUpdateSchema = z.object({
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        patronymic: z.string().optional(),
+        phone: z.string().optional(),
+      });
+
+      const data = profileUpdateSchema.parse(req.body);
+      
+      const updateData: any = {};
+      if (data.firstName !== undefined && data.firstName !== "") updateData.firstName = data.firstName;
+      if (data.lastName !== undefined && data.lastName !== "") updateData.lastName = data.lastName;
+      if (data.patronymic !== undefined && data.patronymic !== "") updateData.patronymic = data.patronymic;
+      if (data.phone !== undefined && data.phone !== "") updateData.phone = data.phone;
+
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ message: "Нет данных для обновления" });
+      }
+
+      const user = await storage.updateUser(req.userId!, updateData);
+
+      res.json(user);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка обновления профиля" });
+    }
+  });
+
+  app.put("/api/auth/password", authenticateToken, async (req, res) => {
+    try {
+      const passwordUpdateSchema = z.object({
+        currentPassword: z.string().min(6),
+        newPassword: z.string().min(6),
+      });
+
+      const data = passwordUpdateSchema.parse(req.body);
+
+      const user = await storage.getUser(req.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      const isValid = await comparePassword(data.currentPassword, user.passwordHash);
+      if (!isValid) {
+        return res.status(400).json({ message: "Неверный текущий пароль" });
+      }
+
+      const passwordHash = await hashPassword(data.newPassword);
+      await storage.updateUser(user.id, { passwordHash });
+
+      res.json({ message: "Пароль успешно изменён" });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка изменения пароля" });
+    }
+  });
+
+  app.get("/api/addresses", authenticateToken, async (req, res) => {
+    try {
+      const addresses = await storage.getUserAddresses(req.userId!);
+      res.json(addresses);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения адресов" });
+    }
+  });
+
+  app.post("/api/addresses", authenticateToken, async (req, res) => {
+    try {
+      const addressSchema = z.object({
+        addressLine1: z.string().min(1),
+        addressLine2: z.string().optional(),
+        city: z.string().min(1),
+        region: z.string().min(1),
+        postalCode: z.string().min(1),
+        isDefault: z.boolean().optional(),
+      });
+
+      const data = addressSchema.parse(req.body);
+
+      const address = await storage.createUserAddress({
+        userId: req.userId!,
+        ...data,
+      });
+      res.json(address);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка создания адреса" });
+    }
+  });
+
+  app.put("/api/addresses/:id", authenticateToken, async (req, res) => {
+    try {
+      const addressUpdateSchema = z.object({
+        addressLine1: z.string().optional(),
+        addressLine2: z.string().optional(),
+        city: z.string().optional(),
+        region: z.string().optional(),
+        postalCode: z.string().optional(),
+        isDefault: z.boolean().optional(),
+      });
+
+      const data = addressUpdateSchema.parse(req.body);
+
+      const updateData: any = {};
+      if (data.addressLine1 !== undefined) updateData.addressLine1 = data.addressLine1;
+      if (data.addressLine2 !== undefined) updateData.addressLine2 = data.addressLine2;
+      if (data.city !== undefined) updateData.city = data.city;
+      if (data.region !== undefined) updateData.region = data.region;
+      if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
+      if (data.isDefault !== undefined) updateData.isDefault = data.isDefault;
+
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ message: "Нет данных для обновления" });
+      }
+
+      const address = await storage.updateUserAddress(req.params.id, updateData);
+      res.json(address);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка обновления адреса" });
+    }
+  });
+
+  app.delete("/api/addresses/:id", authenticateToken, async (req, res) => {
+    try {
+      await storage.deleteUserAddress(req.params.id);
+      res.json({ message: "Адрес удалён" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления адреса" });
+    }
+  });
+
+  app.put("/api/addresses/:id/set-default", authenticateToken, async (req, res) => {
+    try {
+      await storage.setDefaultAddress(req.userId!, req.params.id);
+      res.json({ message: "Адрес установлен по умолчанию" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка установки адреса по умолчанию" });
+    }
+  });
+
+  app.get("/api/payment-cards", authenticateToken, async (req, res) => {
+    try {
+      const cards = await storage.getUserPaymentCards(req.userId!);
+      res.json(cards);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения карт" });
+    }
+  });
+
+  app.post("/api/payment-cards", authenticateToken, async (req, res) => {
+    try {
+      const cardSchema = z.object({
+        lastFourDigits: z.string().length(4),
+        cardBrand: z.string().min(1),
+        expiryMonth: z.string().length(2),
+        expiryYear: z.string().length(4),
+        isDefault: z.boolean().optional(),
+      });
+
+      const data = cardSchema.parse(req.body);
+
+      const card = await storage.createUserPaymentCard({
+        userId: req.userId!,
+        ...data,
+      });
+      res.json(card);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка добавления карты" });
+    }
+  });
+
+  app.delete("/api/payment-cards/:id", authenticateToken, async (req, res) => {
+    try {
+      await storage.deleteUserPaymentCard(req.params.id);
+      res.json({ message: "Карта удалена" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления карты" });
+    }
+  });
+
+  app.put("/api/payment-cards/:id/set-default", authenticateToken, async (req, res) => {
+    try {
+      await storage.setDefaultPaymentCard(req.userId!, req.params.id);
+      res.json({ message: "Карта установлена по умолчанию" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка установки карты по умолчанию" });
+    }
+  });
+
+  app.get("/api/categories", async (req, res) => {
+    try {
+      const categories = await storage.getCategories();
+      res.json(categories);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения категорий" });
+    }
+  });
+
+  app.get("/api/categories/:id", async (req, res) => {
+    try {
+      const category = await storage.getCategory(req.params.id);
+      if (!category) {
+        return res.status(404).json({ message: "Категория не найдена" });
+      }
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения категории" });
+    }
+  });
+
+  app.post("/api/categories", authenticateToken, requireRole("admin"), async (req, res) => {
+    try {
+      const category = await storage.createCategory(req.body);
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка создания категории" });
+    }
+  });
+
+  app.put("/api/categories/:id", authenticateToken, requireRole("admin"), async (req, res) => {
+    try {
+      const category = await storage.updateCategory(req.params.id, req.body);
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка обновления категории" });
+    }
+  });
+
+  app.delete("/api/categories/:id", authenticateToken, requireRole("admin"), async (req, res) => {
+    try {
+      await storage.deleteCategory(req.params.id);
+      res.json({ message: "Категория удалена" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления категории" });
+    }
+  });
+
+  app.get("/api/products", async (req, res) => {
+    try {
+      const {
+        categoryId,
+        search,
+        minPrice,
+        maxPrice,
+        isNew,
+        limit = "20",
+        offset = "0",
+      } = req.query;
+
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+
+      const products = await storage.getProducts({
+        categoryId: categoryId as string,
+        search: search as string,
+        minPrice: minPrice ? parseFloat(minPrice as string) : undefined,
+        maxPrice: maxPrice ? parseFloat(maxPrice as string) : undefined,
+        isNew: isNew === "true" ? true : undefined,
+        limit: limitNum,
+        offset: offsetNum,
+      });
+
+      const page = Math.floor(offsetNum / limitNum) + 1;
+      const totalPages = Math.ceil(products.length / limitNum);
+
+      res.json({
+        products,
+        total: products.length,
+        page,
+        totalPages,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения товаров" });
+    }
+  });
+
+  app.get("/api/products/:id", async (req, res) => {
+    try {
+      const product = await storage.getProduct(req.params.id);
+      if (!product) {
+        return res.status(404).json({ message: "Товар не найден" });
+      }
+
+      const images = await storage.getProductImages(product.id);
+
+      await storage.incrementProductView(product.id);
+
+      res.json({ ...product, images });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения товара" });
+    }
+  });
+
+  app.post(
+    "/api/products",
+    authenticateToken,
+    requireRole("admin"),
+    async (req, res) => {
+      try {
+        const product = await storage.createProduct(req.body);
+        res.json(product);
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка создания товара" });
+      }
+    }
+  );
+
+  app.put(
+    "/api/products/:id",
+    authenticateToken,
+    requireRole("admin"),
+    async (req, res) => {
+      try {
+        const product = await storage.updateProduct(req.params.id, req.body);
+        res.json(product);
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка обновления товара" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/products/:id",
+    authenticateToken,
+    requireRole("admin"),
+    async (req, res) => {
+      try {
+        await storage.deleteProduct(req.params.id);
+        res.json({ message: "Товар удалён" });
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка удаления товара" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/products/:id/images",
+    authenticateToken,
+    requireRole("admin"),
+    productImagesUpload.array("images", 10),
+    async (req, res) => {
+      try {
+        const files = req.files as Express.Multer.File[];
+        const images = [];
+
+        for (const file of files) {
+          const image = await storage.addProductImage({
+            productId: req.params.id,
+            url: `/uploads/products/${file.filename}`,
+            sortOrder: 0,
+          });
+          images.push(image);
+        }
+
+        res.json(images);
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка загрузки изображений" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/products/images/:id",
+    authenticateToken,
+    requireRole("admin"),
+    async (req, res) => {
+      try {
+        await storage.deleteProductImage(req.params.id);
+        res.json({ message: "Изображение удалено" });
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка удаления изображения" });
+      }
+    }
+  );
+
+  app.get("/api/cart", authenticateToken, async (req, res) => {
+    try {
+      const items = await storage.getCartItems(req.userId!);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения корзины" });
+    }
+  });
+
+  app.post("/api/cart", authenticateToken, async (req, res) => {
+    try {
+      const { productId, quantity } = req.body;
+      const item = await storage.addCartItem({
+        userId: req.userId!,
+        productId,
+        quantity,
+      });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка добавления в корзину" });
+    }
+  });
+
+  app.put("/api/cart/:productId", authenticateToken, async (req, res) => {
+    try {
+      const { quantity } = req.body;
+      const item = await storage.updateCartItem(req.userId!, req.params.productId, quantity);
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка обновления корзины" });
+    }
+  });
+
+  app.delete("/api/cart/:productId", authenticateToken, async (req, res) => {
+    try {
+      await storage.deleteCartItem(req.userId!, req.params.productId);
+      res.json({ message: "Товар удалён из корзины" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления из корзины" });
+    }
+  });
+
+  app.delete("/api/cart", authenticateToken, async (req, res) => {
+    try {
+      await storage.clearCart(req.userId!);
+      res.json({ message: "Корзина очищена" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка очистки корзины" });
+    }
+  });
+
+  app.get("/api/wishlist", authenticateToken, async (req, res) => {
+    try {
+      const items = await storage.getWishlistItems(req.userId!);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения избранного" });
+    }
+  });
+
+  app.post("/api/wishlist", authenticateToken, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      const item = await storage.addWishlistItem({
+        userId: req.userId!,
+        productId,
+      });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка добавления в избранное" });
+    }
+  });
+
+  app.delete("/api/wishlist/:productId", authenticateToken, async (req, res) => {
+    try {
+      await storage.deleteWishlistItem(req.userId!, req.params.productId);
+      res.json({ message: "Товар удалён из избранного" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления из избранного" });
+    }
+  });
+
+  app.get("/api/comparison", authenticateToken, async (req, res) => {
+    try {
+      const items = await storage.getComparisonItems(req.userId!);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения сравнения" });
+    }
+  });
+
+  app.post("/api/comparison", authenticateToken, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      const item = await storage.addComparisonItem({
+        userId: req.userId!,
+        productId,
+      });
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка добавления к сравнению" });
+    }
+  });
+
+  app.delete("/api/comparison/:productId", authenticateToken, async (req, res) => {
+    try {
+      await storage.deleteComparisonItem(req.userId!, req.params.productId);
+      res.json({ message: "Товар удалён из сравнения" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления из сравнения" });
+    }
+  });
+
+  app.get("/api/promocodes", authenticateToken, requireRole("admin", "marketer"), async (req, res) => {
+    try {
+      const promocodes = await storage.getPromocodes();
+      res.json(promocodes);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения промокодов" });
+    }
+  });
+
+  app.post("/api/promocodes/validate", authenticateToken, async (req, res) => {
+    try {
+      const { code, orderAmount } = req.body;
+      const result = await validatePromocode(code, req.userId!, orderAmount);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка валидации промокода" });
+    }
+  });
+
+  app.post("/api/promocodes", authenticateToken, requireRole("admin", "marketer"), async (req, res) => {
+    try {
+      const promocode = await storage.createPromocode({
+        ...req.body,
+        createdByUserId: req.userId!,
+      });
+      res.json(promocode);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка создания промокода" });
+    }
+  });
+
+  app.put("/api/promocodes/:id", authenticateToken, requireRole("admin", "marketer"), async (req, res) => {
+    try {
+      const promocode = await storage.updatePromocode(req.params.id, req.body);
+      res.json(promocode);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка обновления промокода" });
+    }
+  });
+
+  app.delete("/api/promocodes/:id", authenticateToken, requireRole("admin", "marketer"), async (req, res) => {
+    try {
+      await storage.deletePromocode(req.params.id);
+      res.json({ message: "Промокод удалён" });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка удаления промокода" });
+    }
+  });
+
+  app.get("/api/orders", authenticateToken, async (req, res) => {
+    try {
+      const roles = await storage.getUserRoles(req.userId!);
+      const isAdmin = roles.some(r => r.role === "admin");
+
+      const orders = await storage.getOrders(
+        isAdmin ? {} : { userId: req.userId! }
+      );
+      res.json(orders);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения заказов" });
+    }
+  });
+
+  app.get("/api/orders/:id", authenticateToken, async (req, res) => {
+    try {
+      const order = await storage.getOrder(req.params.id);
+      if (!order) {
+        return res.status(404).json({ message: "Заказ не найден" });
+      }
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения заказа" });
+    }
+  });
+
+  app.post("/api/orders", authenticateToken, async (req, res) => {
+    try {
+      const data = createOrderSchema.parse(req.body);
+      const user = await storage.getUser(req.userId!);
+
+      if (!user) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      let subtotal = 0;
+      for (const item of data.items) {
+        const price = parseFloat(item.price);
+        subtotal += price * item.quantity;
+      }
+
+      let discountAmount = 0;
+      let promocodeId = null;
+
+      if (data.promocodeId) {
+        const promocodeValidation = await validatePromocode(
+          data.promocodeId,
+          req.userId!,
+          subtotal
+        );
+        if (promocodeValidation.valid && promocodeValidation.discountAmount) {
+          discountAmount = promocodeValidation.discountAmount;
+          promocodeId = promocodeValidation.promocode!.id;
+        }
+      }
+
+      const bonusesUsed = data.bonusesUsed || 0;
+      const { maxUsable } = canUseBonuses(user.bonusBalance, subtotal);
+      
+      if (bonusesUsed > maxUsable) {
+        return res.status(400).json({ message: `Можно использовать максимум ${maxUsable} бонусов` });
+      }
+
+      const deliveryCost = 300;
+      const total = subtotal - discountAmount - bonusesUsed + deliveryCost;
+
+      const bonusesEarned = calculateCashback(
+        total,
+        bonusesUsed > 0,
+        discountAmount > 0
+      );
+
+      const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
+
+      const order = await storage.createOrder({
+        userId: req.userId!,
+        orderNumber,
+        status: "pending",
+        items: data.items as any,
+        subtotal: subtotal.toString(),
+        discountAmount: discountAmount.toString(),
+        bonusesUsed: bonusesUsed.toString(),
+        bonusesEarned: bonusesEarned.toString(),
+        promocodeId,
+        deliveryService: data.deliveryService,
+        deliveryType: data.deliveryType,
+        deliveryPointCode: data.deliveryPointCode || null,
+        deliveryAddress: data.deliveryAddress as any,
+        deliveryCost: deliveryCost.toString(),
+        deliveryTrackingNumber: null,
+        paymentMethod: data.paymentMethod,
+        paymentStatus: "pending",
+        yukassaPaymentId: null,
+        total: total.toString(),
+      });
+
+      if (bonusesUsed > 0) {
+        await storage.updateUser(req.userId!, {
+          bonusBalance: user.bonusBalance - bonusesUsed,
+        });
+      }
+
+      if (promocodeId) {
+        await applyPromocode(promocodeId, req.userId!, order.id);
+      }
+
+      await storage.clearCart(req.userId!);
+
+      res.json(order);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Ошибка создания заказа" });
+    }
+  });
+
+  app.put("/api/orders/:id/status", authenticateToken, requireRole("admin"), async (req, res) => {
+    try {
+      const { status } = req.body;
+      const updateData: any = { status };
+
+      if (status === "paid") {
+        updateData.paidAt = new Date();
+        updateData.paymentStatus = "paid";
+      } else if (status === "shipped") {
+        updateData.shippedAt = new Date();
+      } else if (status === "delivered") {
+        updateData.deliveredAt = new Date();
+      } else if (status === "completed") {
+        updateData.completedAt = new Date();
+
+        const order = await storage.getOrder(req.params.id);
+        if (order && order.userId) {
+          const user = await storage.getUser(order.userId);
+          if (user) {
+            const bonusesEarned = parseFloat(order.bonusesEarned);
+            await storage.updateUser(order.userId, {
+              bonusBalance: user.bonusBalance + bonusesEarned,
+            });
+          }
+        }
+      }
+
+      const order = await storage.updateOrder(req.params.id, updateData);
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка обновления статуса заказа" });
+    }
+  });
+
+  app.get("/api/admin/stats", authenticateToken, requireRole("admin"), async (req, res) => {
+    try {
+      const orders = await storage.getOrders();
+      const totalRevenue = orders.reduce((sum, order) => {
+        return sum + parseFloat(order.total);
+      }, 0);
+
+      const completedOrders = orders.filter(o => o.status === "completed");
+      
+      res.json({
+        totalOrders: orders.length,
+        completedOrders: completedOrders.length,
+        totalRevenue,
+        pendingOrders: orders.filter(o => o.status === "pending").length,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения статистики" });
+    }
+  });
+
+  app.get("/api/support/messages", authenticateToken, async (req, res) => {
+    try {
+      const messages = await storage.getSupportMessages(req.userId!);
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка получения сообщений" });
+    }
+  });
+
+  app.post("/api/support/messages", authenticateToken, async (req, res) => {
+    try {
+      const message = await storage.createSupportMessage({
+        userId: req.userId!,
+        senderId: req.userId!,
+        messageText: req.body.messageText,
+      });
+      res.json(message);
+    } catch (error) {
+      res.status(500).json({ message: "Ошибка отправки сообщения" });
+    }
+  });
+
+  app.post(
+    "/api/support/messages/:id/attachments",
+    authenticateToken,
+    chatAttachmentsUpload.array("files", 5),
+    validateTotalFileSize(50 * 1024 * 1024),
+    async (req, res) => {
+      try {
+        const files = req.files as Express.Multer.File[];
+        const attachments = [];
+
+        for (const file of files) {
+          const attachment = await storage.addSupportMessageAttachment({
+            messageId: req.params.id,
+            fileUrl: `/uploads/chat/${file.filename}`,
+            fileSize: file.size,
+            fileType: file.mimetype,
+          });
+          attachments.push(attachment);
+        }
+
+        res.json(attachments);
+      } catch (error) {
+        res.status(500).json({ message: "Ошибка загрузки вложений" });
+      }
+    }
+  );
+
+  return httpServer;
+}
