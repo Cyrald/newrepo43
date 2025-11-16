@@ -153,6 +153,40 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### Performance Optimization: Database Query Optimization (November 16, 2025)
+
+**Critical Bug Fixes Completed:**
+- ✅ Fixed N+1 query problem in all product-related endpoints
+- ✅ Implemented batch queries for product images using `inArray()`
+- ✅ Added decimal field normalization (price, rating, dimensions) in all endpoints
+- ✅ Fixed catalog page: added `onAddToCart` and `onAddToWishlist` handlers to ProductCard
+- ✅ Optimized database methods to use 2-3 queries instead of 1+N queries
+
+**Affected Methods:**
+1. `getProducts()` - Batch loads all product images in single query
+2. `getCartItems()` - Batch loads images with decimal normalization
+3. `getWishlistItems()` - Deduplicated IDs + batch queries + decimal normalization
+4. `getComparisonItems()` - Deduplicated IDs + batch queries + decimal normalization
+
+**Performance Impact:**
+- **Before:** 1 + N queries (1 for products + 1 per product for images)
+- **After:** 2-3 queries total (products + all images + categories if needed)
+- **Example:** Catalog with 30 products: 31 queries → 3 queries (10x improvement)
+
+**Technical Implementation:**
+- Used `inArray()` from Drizzle ORM for batch loading
+- Created image lookup maps (`imagesByProductId`) for O(1) access
+- Added `Array.from(new Set(...))` for ID deduplication
+- Normalized all decimal fields (price, discountPercentage, rating, etc.) to strings
+- Maintained consistent API contract across all endpoints
+
+**Frontend Fixes:**
+- `catalog-page.tsx`: Added missing `handleAddToCart` and `handleAddToWishlist` props to ProductCard
+- Proper error handling with toast notifications for cart/wishlist operations
+- Stock quantity validation before adding to cart
+
+**Architecture Review:** All changes passed architect review - no N+1 problems, proper serialization, production-ready code.
+
 ### Comprehensive Project Analysis and Development Report (November 16, 2025) - CURRENT SESSION
 
 **Project Audit Completed:**
