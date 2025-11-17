@@ -11,7 +11,7 @@ export const sessionMiddleware = session({
     tableName: 'session',
     createTableIfMissing: true,
   }),
-  secret: env.JWT_SECRET,
+  secret: env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {

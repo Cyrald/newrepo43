@@ -6,6 +6,14 @@ This is a full-featured e-commerce platform for natural and organic products, bu
 
 ## Recent Changes
 
+**November 17, 2025** - Исправление аутентификации и безопасности:
+- ✅ Исправлен flow авторизации: после login вызывается checkAuth() для загрузки ролей
+- ✅ ProtectedRoute показывает loading вместо блокировки если роли ещё не загружены
+- ✅ Убрана утечка информации: список ролей больше не показывается в тексте ошибок
+- ✅ JWT_SECRET переименован в SESSION_SECRET (правильное название для сессий)
+- ✅ Безопасная генерация SESSION_SECRET: авто-генерация только в dev, production требует явный ключ
+- 🔐 Архитектура безопасности: все проверки прав выполняются на backend, frontend только для UX
+
 **November 16, 2025** - Фаза 1: Усиление безопасности и подключение frontend:
 - ✅ JWT_SECRET валидация через Zod (требует 32+ символов, убрано дефолтное значение)
 - ✅ Rate limiting для auth endpoints (5 попыток/15 мин для login/register, 10/мин для promocodes)
@@ -70,10 +78,11 @@ Preferred communication style: Simple, everyday language.
 - RESTful API endpoints under `/api`
 
 **Authentication & Authorization:**
-- JWT tokens for stateless authentication
+- Session-based authentication with PostgreSQL session store (connect-pg-simple)
 - bcrypt for password hashing
 - Role-based access control (RBAC) with middleware
 - Roles: Customer, Consultant, Marketer, Admin
+- Backend enforces all authorization checks, frontend only for UX
 
 **File Upload:**
 - Multer middleware for `multipart/form-data`

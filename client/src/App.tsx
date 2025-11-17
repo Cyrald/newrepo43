@@ -67,7 +67,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      {/* Admin Routes - require admin, marketer, or consultant roles */}
+      {/* Admin Routes - require staff role */}
       <Route path="/admin">
         <ProtectedRoute roles={["admin", "marketer", "consultant"]}>
           <AdminDashboardPage />
@@ -94,7 +94,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       <Route path="/admin/orders">
-        <ProtectedRoute roles={["admin"]}>
+        <ProtectedRoute roles={["admin", "consultant"]}>
           <AdminOrdersPage />
         </ProtectedRoute>
       </Route>

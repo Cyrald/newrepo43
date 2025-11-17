@@ -461,7 +461,9 @@ export const insertSupportMessageAttachmentSchema = createInsertSchema(supportMe
 // TYPESCRIPT TYPES
 // ============================================
 
-export type User = typeof users.$inferSelect;
+export type User = typeof users.$inferSelect & {
+  roles?: string[];
+};
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
 export type UserRole = typeof userRoles.$inferSelect;

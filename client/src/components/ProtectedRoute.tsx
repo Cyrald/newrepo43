@@ -1,9 +1,6 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuthStore } from "@/stores/authStore";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -41,31 +38,22 @@ export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
   if (roles && roles.length > 0) {
     const userRoles = user?.roles || [];
     const hasRequiredRole = roles.some(role => userRoles.includes(role));
-
+    
     if (!hasRequiredRole) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="rounded-full bg-destructive/10 p-3">
-                  <AlertCircle className="h-6 w-6 text-destructive" />
-                </div>
-                <div>
-                  <CardTitle>Доступ запрещён</CardTitle>
-                  <CardDescription>У вас недостаточно прав для просмотра этой страницы</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                Эта страница доступна только пользователям с ролями: {roles.join(", ")}
-              </p>
-              <Button onClick={() => setLocation("/")} className="w-full">
-                Вернуться на главную
-              </Button>
-            </CardContent>
-          </Card>
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-2">Доступ запрещён</h1>
+            <p className="text-muted-foreground mb-4">
+              У вас нет прав для просмотра этой страницы
+            </p>
+            <button
+              onClick={() => setLocation("/")}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              На главную
+            </button>
+          </div>
         </div>
       );
     }

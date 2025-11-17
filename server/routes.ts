@@ -110,9 +110,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await sendVerificationEmail(user.email, verificationToken, user.firstName);
 
       const roles = await storage.getUserRoles(user.id);
+      const roleNames = roles.map(r => r.role);
       
       req.session.userId = user.id;
-      req.session.userRoles = roles.map(r => r.role);
+      req.session.userRoles = roleNames;
 
       res.json({
         user: {
@@ -123,6 +124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phone: user.phone,
           isVerified: user.isVerified,
           bonusBalance: user.bonusBalance,
+          roles: roleNames,
         },
       });
     } catch (error) {
@@ -148,9 +150,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const roles = await storage.getUserRoles(user.id);
+      const roleNames = roles.map(r => r.role);
       
       req.session.userId = user.id;
-      req.session.userRoles = roles.map(r => r.role);
+      req.session.userRoles = roleNames;
 
       res.json({
         user: {
@@ -161,6 +164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phone: user.phone,
           isVerified: user.isVerified,
           bonusBalance: user.bonusBalance,
+          roles: roleNames,
         },
       });
     } catch (error) {
