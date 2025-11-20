@@ -26,7 +26,12 @@ export default function CartPage() {
 
   const handleUpdateQuantity = async (productId: string, newQuantity: number) => {
     try {
-      await updateCartMutation.mutateAsync({ productId, quantity: newQuantity })
+      if (newQuantity <= 0) {
+        // Удаляем товар при количестве <= 0
+        await removeCartMutation.mutateAsync(productId)
+      } else {
+        await updateCartMutation.mutateAsync({ productId, quantity: newQuantity })
+      }
     } catch (error: any) {
       toast({
         title: "Ошибка",
@@ -120,7 +125,6 @@ export default function CartPage() {
                               size="icon"
                               className="h-8 w-8"
                               onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
-                              disabled={item.quantity <= 1}
                               data-testid={`button-decrease-${item.id}`}
                             >
                               <Minus className="h-3 w-3" />
@@ -139,9 +143,14 @@ export default function CartPage() {
                               onBlur={() => {
                                 const value = editingQuantities[item.id];
                                 const num = parseInt(value, 10);
-                                if (!isNaN(num) && num > 0) {
-                                  const clampedQty = Math.min(num, item.product.stockQuantity);
-                                  handleUpdateQuantity(item.product.id, clampedQty);
+                                if (!isNaN(num)) {
+                                  if (num <= 0) {
+                                    // Удаляем товар при вводе 0 или отрицательного числа
+                                    handleUpdateQuantity(item.product.id, 0);
+                                  } else {
+                                    const clampedQty = Math.min(num, item.product.stockQuantity);
+                                    handleUpdateQuantity(item.product.id, clampedQty);
+                                  }
                                 }
                                 // Очистить локальный state
                                 setEditingQuantities(prev => {

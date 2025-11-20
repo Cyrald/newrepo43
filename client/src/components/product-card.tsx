@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Product } from "@shared/schema"
 import { useCartStore } from "@/stores/cartStore"
-import { useUpdateCartItem } from "@/hooks/useCart"
+import { useUpdateCartItem, useRemoveFromCart } from "@/hooks/useCart"
 
 interface ProductCardProps {
   product: Product & { images?: { url: string }[] }
@@ -25,6 +25,7 @@ export function ProductCard({ product, onAddToCart, onToggleWishlist, isInWishli
   const cartItems = useCartStore((state) => state.items)
   const cartQuantity = cartItems.find(item => item.productId === product.id)?.quantity || 0
   const updateCartItem = useUpdateCartItem()
+  const removeCartItem = useRemoveFromCart()
   const displayQuantity = localQuantity === "" ? String(cartQuantity) : localQuantity
   const hasDiscount = parseFloat(product.discountPercentage) > 0
   const discountedPrice = hasDiscount
@@ -62,9 +63,14 @@ export function ProductCard({ product, onAddToCart, onToggleWishlist, isInWishli
 
   const handleQuantityBlur = () => {
     const newQuantity = parseInt(localQuantity, 10)
-    if (!isNaN(newQuantity) && newQuantity > 0) {
-      const clampedQuantity = Math.min(Math.max(1, newQuantity), product.stockQuantity)
-      updateCartItem.mutate({ productId: product.id, quantity: clampedQuantity })
+    if (!isNaN(newQuantity)) {
+      if (newQuantity <= 0) {
+        // Удаляем товар при вводе 0 или отрицательного числа
+        removeCartItem.mutate(product.id)
+      } else {
+        const clampedQuantity = Math.min(newQuantity, product.stockQuantity)
+        updateCartItem.mutate({ productId: product.id, quantity: clampedQuantity })
+      }
     }
     setLocalQuantity("") // Сбросить после обновления
   }
@@ -166,10 +172,12 @@ export function ProductCard({ product, onAddToCart, onToggleWishlist, isInWishli
                     onClick={(e) => { 
                       e.preventDefault(); 
                       e.stopPropagation();
-                      const newQty = Math.max(1, cartQuantity - 1);
-                      updateCartItem.mutate({ productId: product.id, quantity: newQty });
+                      if (cartQuantity === 1) {
+                        removeCartItem.mutate(product.id);
+                      } else {
+                        updateCartItem.mutate({ productId: product.id, quantity: cartQuantity - 1 });
+                      }
                     }}
-                    disabled={cartQuantity <= 1}
                   >
                     <Minus className="h-3 w-3" />
                   </Button>
