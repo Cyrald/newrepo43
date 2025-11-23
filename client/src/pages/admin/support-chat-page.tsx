@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Send, MessageCircle, User, ShoppingBag, Archive, FolderClosed, FolderOpen, Search } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { format } from "date-fns"
@@ -297,37 +298,36 @@ export default function AdminSupportChatPage() {
 
       <div className="grid grid-cols-12 gap-4 min-h-[calc(100vh-160px)]">
         <Card className="col-span-3 flex flex-col">
-          <CardHeader className="pb-2 px-3 pt-3">
-            <CardTitle className="text-base mb-2">Диалоги</CardTitle>
-            <div className="flex gap-1">
-              <Button
-                variant={statusFilter === 'open' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setStatusFilter('open')}
-                className="flex-1 h-7 text-xs"
-              >
-                <FolderOpen className="h-3 w-3 mr-1" />
-                Открытые
-              </Button>
-              <Button
-                variant={statusFilter === 'archived' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setStatusFilter('archived')}
-                className="flex-1 h-7 text-xs"
-              >
-                <Archive className="h-3 w-3 mr-1" />
-                Архив
-              </Button>
-              <Button
-                variant={statusFilter === 'closed' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setStatusFilter('closed')}
-                className="flex-1 h-7 text-xs"
-              >
-                <FolderClosed className="h-3 w-3 mr-1" />
-                Закрытые
-              </Button>
-            </div>
+          <CardHeader className="p-2">
+            <CardTitle className="text-sm mb-2">Диалоги</CardTitle>
+            <Tabs 
+              value={statusFilter} 
+              onValueChange={(value) => setStatusFilter(value as 'open' | 'archived' | 'closed')}
+            >
+              <TabsList className="h-auto flex-col items-stretch w-full p-1 bg-muted/30">
+                <TabsTrigger 
+                  value="open" 
+                  className="justify-start text-[11px] h-6 px-2"
+                >
+                  <FolderOpen className="h-2.5 w-2.5 mr-1.5" />
+                  Открытые
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="archived" 
+                  className="justify-start text-[11px] h-6 px-2"
+                >
+                  <Archive className="h-2.5 w-2.5 mr-1.5" />
+                  Архив
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="closed" 
+                  className="justify-start text-[11px] h-6 px-2"
+                >
+                  <FolderClosed className="h-2.5 w-2.5 mr-1.5" />
+                  Закрытые
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
             
             {statusFilter === 'closed' && (
               <div className="mt-2 space-y-1.5 pt-2 border-t">
@@ -335,7 +335,7 @@ export default function AdminSupportChatPage() {
                   placeholder="Email..."
                   value={searchEmail}
                   onChange={(e) => setSearchEmail(e.target.value)}
-                  className="h-7 text-xs"
+                  className="h-6 text-[11px]"
                 />
                 <div className="grid grid-cols-2 gap-1">
                   <Input
@@ -343,23 +343,23 @@ export default function AdminSupportChatPage() {
                     placeholder="От"
                     value={searchDateFrom}
                     onChange={(e) => setSearchDateFrom(e.target.value)}
-                    className="h-7 text-xs"
+                    className="h-6 text-[11px]"
                   />
                   <Input
                     type="date"
                     placeholder="До"
                     value={searchDateTo}
                     onChange={(e) => setSearchDateTo(e.target.value)}
-                    className="h-7 text-xs"
+                    className="h-6 text-[11px]"
                   />
                 </div>
                 <Button
                   size="sm"
                   onClick={() => refetchClosedSearch()}
-                  className="w-full h-7 text-xs"
+                  className="w-full h-6 text-[11px]"
                   variant="secondary"
                 >
-                  <Search className="h-3 w-3 mr-1" />
+                  <Search className="h-2.5 w-2.5 mr-1" />
                   Поиск
                 </Button>
               </div>
@@ -383,22 +383,22 @@ export default function AdminSupportChatPage() {
                     <button
                       key={conv.userId}
                       onClick={() => setSelectedUserId(conv.userId)}
-                      className={`w-full text-left p-2.5 hover:bg-accent transition-colors ${
+                      className={`w-full text-left p-2 hover:bg-accent transition-colors ${
                         selectedUserId === conv.userId ? "bg-accent" : ""
                       }`}
                     >
                       <div className="flex items-start justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
-                          <User className="h-3 w-3 text-muted-foreground" />
-                          <span className="font-medium text-xs">
+                          <User className="h-2.5 w-2.5 text-muted-foreground" />
+                          <span className="font-medium text-[11px]">
                             #{conv.userId.slice(0, 8)}
                           </span>
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2 mb-0.5">
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 mb-0.5">
                         {conv.lastMessage.messageText}
                       </p>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[9px] text-muted-foreground">
                         {format(new Date(conv.lastMessage.createdAt), "dd MMM, HH:mm", {
                           locale: ru,
                         })}
@@ -412,10 +412,10 @@ export default function AdminSupportChatPage() {
         </Card>
 
         <Card className="col-span-6 flex flex-col">
-          <CardHeader className="border-b pb-2 px-3 pt-3">
+          <CardHeader className="border-b p-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageCircle className="h-4 w-4" />
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MessageCircle className="h-3.5 w-3.5" />
                 {selectedUserId ? `Диалог` : "Выберите диалог"}
               </CardTitle>
               {selectedUserId && selectedConversation && (
@@ -427,9 +427,9 @@ export default function AdminSupportChatPage() {
                         size="sm"
                         onClick={() => archiveMutation.mutate(selectedUserId)}
                         disabled={archiveMutation.isPending}
-                        className="h-7 text-xs"
+                        className="h-6 text-[11px]"
                       >
-                        <Archive className="h-3 w-3 mr-1" />
+                        <Archive className="h-2.5 w-2.5 mr-1" />
                         Архивировать
                       </Button>
                       <Button
@@ -437,9 +437,9 @@ export default function AdminSupportChatPage() {
                         size="sm"
                         onClick={() => closeMutation.mutate(selectedUserId)}
                         disabled={closeMutation.isPending}
-                        className="h-7 text-xs"
+                        className="h-6 text-[11px]"
                       >
-                        <FolderClosed className="h-3 w-3 mr-1" />
+                        <FolderClosed className="h-2.5 w-2.5 mr-1" />
                         Закрыть
                       </Button>
                     </>
@@ -451,9 +451,9 @@ export default function AdminSupportChatPage() {
                         size="sm"
                         onClick={() => reopenMutation.mutate(selectedUserId)}
                         disabled={reopenMutation.isPending}
-                        className="h-7 text-xs"
+                        className="h-6 text-[11px]"
                       >
-                        <FolderOpen className="h-3 w-3 mr-1" />
+                        <FolderOpen className="h-2.5 w-2.5 mr-1" />
                         Переоткрыть
                       </Button>
                       <Button
@@ -461,9 +461,9 @@ export default function AdminSupportChatPage() {
                         size="sm"
                         onClick={() => closeMutation.mutate(selectedUserId)}
                         disabled={closeMutation.isPending}
-                        className="h-7 text-xs"
+                        className="h-6 text-[11px]"
                       >
-                        <FolderClosed className="h-3 w-3 mr-1" />
+                        <FolderClosed className="h-2.5 w-2.5 mr-1" />
                         Закрыть
                       </Button>
                     </>
@@ -482,7 +482,7 @@ export default function AdminSupportChatPage() {
               </div>
             ) : (
               <>
-                <ScrollArea ref={scrollAreaRef} className="flex-1 p-3">
+                <ScrollArea ref={scrollAreaRef} className="flex-1 p-2">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center h-full">
                       <div className="text-center">
@@ -502,7 +502,7 @@ export default function AdminSupportChatPage() {
                             }`}
                           >
                             <div
-                              className={`max-w-[75%] rounded-xl px-3 py-1.5 shadow-sm ${
+                              className={`max-w-[75%] rounded-xl px-2.5 py-1.5 shadow-sm ${
                                 isCustomerMessage
                                   ? "bg-muted/70 rounded-tl-sm"
                                   : "bg-primary text-primary-foreground rounded-tr-sm"
@@ -512,7 +512,7 @@ export default function AdminSupportChatPage() {
                                 {msg.messageText}
                               </p>
                             </div>
-                            <span className="text-[10px] text-muted-foreground px-1">
+                            <span className="text-[9px] text-muted-foreground px-1">
                               {format(new Date(msg.createdAt), "HH:mm", { locale: ru })}
                             </span>
                           </div>
@@ -523,7 +523,7 @@ export default function AdminSupportChatPage() {
                 </ScrollArea>
 
                 {selectedConversation?.status !== 'closed' && (
-                  <div className="p-3 border-t bg-muted/20">
+                  <div className="p-2 border-t bg-muted/20">
                     <div className="flex gap-2 items-end">
                       <Textarea
                         placeholder="Введите ответ..."
@@ -539,18 +539,18 @@ export default function AdminSupportChatPage() {
                         size="icon"
                         className="h-8 w-8 shrink-0"
                       >
-                        <Send className="h-3 w-3" />
+                        <Send className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
+                    <p className="text-[9px] text-muted-foreground mt-1 px-0.5">
                       Enter — отправить, Shift+Enter — новая строка
                     </p>
                   </div>
                 )}
                 
                 {selectedConversation?.status === 'closed' && (
-                  <div className="p-3 border-t bg-muted/40 text-center">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="p-2 border-t bg-muted/40 text-center">
+                    <p className="text-[11px] text-muted-foreground">
                       Чат закрыт. Сообщения сохранены в соответствии с 152-ФЗ.
                     </p>
                   </div>
@@ -561,10 +561,10 @@ export default function AdminSupportChatPage() {
         </Card>
 
         <Card className="col-span-3 flex flex-col">
-          <CardHeader className="pb-2 px-3 pt-3">
-            <CardTitle className="text-base">Информация о клиенте</CardTitle>
+          <CardHeader className="p-2">
+            <CardTitle className="text-sm">Информация о клиенте</CardTitle>
           </CardHeader>
-          <CardContent className="px-3">
+          <CardContent className="px-2">
             {!selectedUserId ? (
               <p className="text-xs text-muted-foreground text-center py-6">
                 Выберите диалог

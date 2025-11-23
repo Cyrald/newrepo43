@@ -18,32 +18,24 @@ export function SupportChatLauncher() {
     return null
   }
 
-  const toggleChat = () => {
-    if (isOpen) {
-      closeChat()
-    } else {
-      openChat()
-    }
-  }
-
   return (
     <>
-      {/* Floating Chat Button with Animation */}
-      <Button
-        onClick={toggleChat}
-        size="icon"
-        className="!fixed bottom-6 right-6 h-[52px] w-[52px] rounded-full shadow-lg hover:shadow-xl transition-all !z-[9999] bg-primary hover:bg-primary/90 animate-in fade-in zoom-in-75 duration-300"
-        aria-label={isOpen ? "Закрыть чат поддержки" : "Открыть чат поддержки"}
-      >
-        {isOpen ? (
-          <X className="h-7 w-7 animate-in fade-in rotate-in duration-200" />
-        ) : (
-          <MessageCircle className="h-7 w-7 animate-in fade-in duration-200" />
-        )}
-      </Button>
+      {/* Floating Chat Button - Only show when chat is closed */}
+      {!isOpen && (
+        <Button
+          onClick={openChat}
+          size="icon"
+          className="!fixed bottom-6 right-6 h-[52px] w-[52px] rounded-full shadow-lg hover:shadow-xl transition-all !z-[9999] bg-primary hover:bg-primary/90 animate-in fade-in zoom-in-75 duration-300"
+          aria-label="Открыть чат поддержки"
+        >
+          <MessageCircle className="h-7 w-7" />
+        </Button>
+      )}
 
-      {/* Chat Widget */}
-      <SupportChatWidget isOpen={isOpen} onClose={closeChat} />
+      {/* Chat Widget - Only show when chat is open */}
+      {isOpen && (
+        <SupportChatWidget isOpen={isOpen} onClose={closeChat} />
+      )}
     </>
   )
 }
