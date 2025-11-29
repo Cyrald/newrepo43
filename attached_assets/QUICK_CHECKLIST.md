@@ -12,7 +12,7 @@
 [ ] 2.1 Zod валидация (6ч) - addresses, payment-cards
 [ ] 2.2 Middleware владения (3ч) - requireOwnership
 [ ] 2.3 Обработка ошибок (4ч) - AppError, errorHandler
-[ ] 2.4 Admin функционал (8ч) - CRUD промокодов, ролей
+[ ] 2.4 Admin функционал (8ч) - CRUD промокодов, ролей()
 ```
 
 ## 🟢 СРЕДНИЕ (Желательно)
