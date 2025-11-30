@@ -9,6 +9,7 @@ import { logLoginAttempt, logRegistration } from "../utils/securityLogger";
 import { logger } from "../utils/logger";
 import { invalidateAllUserSessions } from "../utils/sessionManager";
 import { validatePassword } from "../utils/sanitize";
+import { generateCsrfToken } from "../middleware/csrf";
 
 const router = Router();
 
@@ -60,6 +61,8 @@ router.post("/register", registerLimiter, async (req, res) => {
     req.session.userId = user.id;
     req.session.userRoles = roleNames;
     
+    const csrfToken = generateCsrfToken(req, res);
+    
     logRegistration({
       email: user.email,
       userId: user.id,
@@ -78,6 +81,7 @@ router.post("/register", registerLimiter, async (req, res) => {
         bonusBalance: user.bonusBalance,
         roles: roleNames,
       },
+      csrfToken,
     });
   });
 });
@@ -117,6 +121,8 @@ router.post("/login", authLimiter, async (req, res) => {
     req.session.userId = user.id;
     req.session.userRoles = roleNames;
     
+    const csrfToken = generateCsrfToken(req, res);
+    
     logLoginAttempt({
       email: user.email,
       userId: user.id,
@@ -136,6 +142,7 @@ router.post("/login", authLimiter, async (req, res) => {
         bonusBalance: user.bonusBalance,
         roles: roleNames,
       },
+      csrfToken,
     });
   });
 });

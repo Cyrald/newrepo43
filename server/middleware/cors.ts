@@ -12,7 +12,8 @@ export const corsMiddleware = cors({
         ].filter(Boolean);
         
         if (!origin) {
-          callback(null, true);
+          logger.warn('CORS rejected request without Origin header in production');
+          callback(null, false);
           return;
         }
         

@@ -49,3 +49,5 @@ export function csrfTokenEndpoint(req: Request, res: Response): void {
   const csrfToken = generateCsrfToken(req, res);
   res.json({ csrfToken });
 }
+
+export { generateCsrfToken };

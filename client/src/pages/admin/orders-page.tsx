@@ -168,7 +168,7 @@ export default function AdminOrdersPage() {
                           {new Date(order.createdAt).toLocaleDateString("ru-RU")}
                         </TableCell>
                         <TableCell>
-                          {parseFloat(order.totalAmount)} ₽
+                          {parseFloat(order.total)} ₽
                         </TableCell>
                         <TableCell>
                           <Badge variant={getStatusBadgeVariant(order.status)}>

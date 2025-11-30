@@ -5,6 +5,8 @@ import { productImagesUpload, productFormDataUpload } from "../upload";
 import { productImagePipeline } from "../ImagePipeline";
 import { sanitizeSearchQuery, sanitizeNumericParam, sanitizeId } from "../utils/sanitize";
 import { searchLimiter, uploadLimiter } from "../middleware/rateLimiter";
+import { createProductSchema } from "@shared/schema";
+import { z } from "zod";
 
 const router = Router();
 
@@ -74,41 +76,19 @@ router.post(
   uploadLimiter,
   productFormDataUpload.none(),
   async (req, res) => {
-    const productData = { ...req.body };
-    
-    const stockQty = (productData.stockQuantity || '0').trim();
-    if (!/^\d+$/.test(stockQty)) {
-      return res.status(400).json({ message: "Некорректное количество на складе" });
-    }
-    productData.stockQuantity = parseInt(stockQty, 10);
-    
-    if (productData.shelfLifeDays && productData.shelfLifeDays !== '') {
-      const daysStr = productData.shelfLifeDays.trim();
-      if (/^\d+$/.test(daysStr)) {
-        productData.shelfLifeDays = parseInt(daysStr, 10);
-      } else {
-        productData.shelfLifeDays = null;
+    try {
+      const validatedData = createProductSchema.parse(req.body);
+      const product = await storage.createProduct(validatedData);
+      res.json(product);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: error.errors[0].message,
+          errors: error.errors 
+        });
       }
-    } else {
-      productData.shelfLifeDays = null;
+      throw error;
     }
-    
-    if (productData.isNew !== undefined) productData.isNew = productData.isNew === 'true';
-    if (productData.isArchived !== undefined) productData.isArchived = productData.isArchived === 'true';
-    
-    if (productData.discountStartDate && productData.discountStartDate !== '') {
-      productData.discountStartDate = new Date(productData.discountStartDate);
-    } else {
-      productData.discountStartDate = null;
-    }
-    if (productData.discountEndDate && productData.discountEndDate !== '') {
-      productData.discountEndDate = new Date(productData.discountEndDate);
-    } else {
-      productData.discountEndDate = null;
-    }
-    
-    const product = await storage.createProduct(productData);
-    res.json(product);
   }
 );
 

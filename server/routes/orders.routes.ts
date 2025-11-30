@@ -64,10 +64,25 @@ export function createOrdersRoutes(connectedUsers: Map<string, ConnectedUser>) {
         });
       }
 
+      const productPrices = new Map<string, number>();
+      for (const item of data.items) {
+        const product = await storage.getProduct(item.productId);
+        if (!product) {
+          logger.error('Product not found during price validation', { 
+            productId: item.productId, 
+            userId: req.userId 
+          });
+          return res.status(400).json({ 
+            message: `Товар с ID ${item.productId} не найден` 
+          });
+        }
+        productPrices.set(item.productId, parseFloat(product.price));
+      }
+
       let subtotal = 0;
       for (const item of data.items) {
-        const price = parseFloat(item.price);
-        subtotal += price * item.quantity;
+        const realPrice = productPrices.get(item.productId) || 0;
+        subtotal += realPrice * item.quantity;
       }
 
       const subtotalAfterPromocode = subtotal;

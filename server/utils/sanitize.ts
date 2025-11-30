@@ -150,3 +150,14 @@ export function sanitizeHtml(input: string): string {
     .replace(/on\w+\s*=/gi, '')
     .replace(/<[^>]+>/g, '');
 }
+
+export function escapeLikePattern(pattern: string): string {
+  if (!pattern || typeof pattern !== 'string') {
+    return '';
+  }
+  
+  return pattern
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+}

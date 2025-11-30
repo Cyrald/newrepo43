@@ -445,6 +445,63 @@ export const insertProductSchema = createInsertSchema(products, {
   viewCount: true,
 });
 
+export const createProductSchema = z.object({
+  name: z.string()
+    .min(1, "Название обязательно")
+    .max(200, "Название слишком длинное"),
+  sku: z.string()
+    .min(1, "Артикул обязателен")
+    .max(50, "Артикул слишком длинный"),
+  description: z.string()
+    .min(10, "Описание должно быть не менее 10 символов")
+    .max(5000, "Описание слишком длинное"),
+  composition: z.string()
+    .min(1, "Состав обязателен")
+    .max(1000, "Состав слишком длинный"),
+  storageConditions: z.string()
+    .min(1, "Условия хранения обязательны")
+    .max(500, "Условия хранения слишком длинные"),
+  price: z.union([
+    z.string().refine((val) => {
+      const num = parseFloat(val);
+      return !isNaN(num) && num > 0;
+    }, "Цена должна быть больше 0"),
+    z.number().positive("Цена должна быть больше 0")
+  ]).transform((val) => typeof val === 'number' ? val.toString() : val),
+  stockQuantity: z.union([
+    z.string().refine((val) => {
+      const num = parseInt(val, 10);
+      return !isNaN(num) && num >= 0;
+    }, "Количество должно быть >= 0"),
+    z.number().int().min(0, "Количество должно быть >= 0")
+  ]).transform((val) => typeof val === 'string' ? parseInt(val, 10) : val),
+  categoryId: z.string().uuid("Неверный ID категории"),
+  discountPercentage: z.union([
+    z.string(),
+    z.number()
+  ]).transform((val) => typeof val === 'number' ? val.toString() : val).optional(),
+  discountStartDate: z.union([
+    z.string().transform((val) => val ? new Date(val) : null),
+    z.date(),
+    z.null()
+  ]).optional().nullable(),
+  discountEndDate: z.union([
+    z.string().transform((val) => val ? new Date(val) : null),
+    z.date(),
+    z.null()
+  ]).optional().nullable(),
+  shelfLifeDays: z.union([
+    z.string().refine((val) => val === '' || /^\d+$/.test(val), "Срок годности должен быть числом"),
+    z.number().int().positive(),
+    z.null()
+  ]).transform((val) => {
+    if (val === '' || val === null) return null;
+    return typeof val === 'string' ? parseInt(val, 10) : val;
+  }).optional().nullable(),
+  isNew: z.union([z.boolean(), z.string()]).transform((val) => val === true || val === 'true').optional(),
+  isArchived: z.union([z.boolean(), z.string()]).transform((val) => val === true || val === 'true').optional(),
+});
+
 export const insertProductImageSchema = createInsertSchema(productImages).omit({
   id: true,
   createdAt: true,

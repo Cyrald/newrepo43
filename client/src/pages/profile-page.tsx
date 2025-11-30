@@ -309,7 +309,7 @@ export default function ProfilePage() {
                             <Separator className="my-4" />
                             <div className="flex justify-between items-center">
                               <p className="text-lg font-semibold">
-                                {order.totalAmount.toFixed(0)} ₽
+                                {parseFloat(order.total).toFixed(0)} ₽
                               </p>
                               <Button variant="outline" size="sm">
                                 Подробнее

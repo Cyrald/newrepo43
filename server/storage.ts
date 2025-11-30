@@ -47,6 +47,7 @@ import {
   supportMessageAttachments,
 } from "@shared/schema";
 import { eq, and, desc, sql, like, gte, lte, or, inArray, isNull, isNotNull } from "drizzle-orm";
+import { escapeLikePattern } from "./utils/sanitize";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -256,11 +257,12 @@ export class DatabaseStorage implements IStorage {
       conditions.push(or(...categoryConditions)!);
     }
     if (filters?.search) {
-      const searchTerm = `%${filters.search}%`;
+      const sanitized = escapeLikePattern(filters.search);
+      const searchTerm = `%${sanitized}%`;
       conditions.push(
         or(
-          sql`${products.name} ILIKE ${searchTerm}`,
-          sql`${products.description} ILIKE ${searchTerm}`
+          sql`${products.name} ILIKE ${searchTerm} ESCAPE '\\'`,
+          sql`${products.description} ILIKE ${searchTerm} ESCAPE '\\'`
         )!
       );
     }

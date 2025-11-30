@@ -26,6 +26,14 @@ export class ApiError extends Error {
   }
 }
 
+function getCsrfTokenFromCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  
+  const cookies = document.cookie.split('; ');
+  const csrfCookie = cookies.find(c => c.startsWith('csrf-token='));
+  return csrfCookie ? csrfCookie.split('=')[1] : null;
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -36,6 +44,11 @@ async function fetchApi<T>(
 
   if (!(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
+  }
+
+  const csrfToken = getCsrfTokenFromCookie();
+  if (csrfToken && options.method && options.method !== 'GET') {
+    headers["x-csrf-token"] = csrfToken;
   }
 
   const response = await fetch(endpoint, {

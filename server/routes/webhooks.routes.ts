@@ -11,20 +11,30 @@ const router = Router();
 
 function verifyYooKassaSignature(body: Buffer | string, signature: string, secretKey: string): boolean {
   try {
-    if (!/^[0-9a-fA-F]+$/.test(signature)) {
-      logger.warn('Invalid signature format - not hex');
-      return false;
-    }
-
     const hmac = crypto
       .createHmac('sha256', secretKey)
       .update(body)
-      .digest('hex');
+      .digest();
     
-    return crypto.timingSafeEqual(
-      Buffer.from(signature, 'hex'),
-      Buffer.from(hmac, 'hex')
-    );
+    let signatureBuffer: Buffer;
+    const isValidFormat = /^[0-9a-fA-F]+$/.test(signature);
+    
+    if (isValidFormat) {
+      try {
+        signatureBuffer = Buffer.from(signature, 'hex');
+        if (signatureBuffer.length !== hmac.length) {
+          signatureBuffer = Buffer.alloc(hmac.length);
+        }
+      } catch {
+        signatureBuffer = Buffer.alloc(hmac.length);
+      }
+    } else {
+      signatureBuffer = Buffer.alloc(hmac.length);
+    }
+    
+    const isEqual = crypto.timingSafeEqual(signatureBuffer, hmac);
+    
+    return isValidFormat && isEqual;
   } catch (error) {
     logger.error('YooKassa signature verification failed', { error });
     return false;
