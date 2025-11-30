@@ -17,17 +17,23 @@ const {
       logger.warn('No session identifier available for CSRF validation', {
         hasSession: !!req.session,
         hasSessionID: !!req.sessionID,
+        path: req.path,
+        method: req.method,
       });
+      
+      // Generate unique temporary identifier instead of using 'anonymous'
+      // This prevents all anonymous users from sharing the same CSRF token
+      return `temp-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     }
     
-    return sessionId || 'anonymous';
+    return sessionId;
   },
   cookieName: 'csrf-token',
   cookieOptions: {
     httpOnly: false,
     secure: env.NODE_ENV === 'production',
     sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 365 * 24 * 60 * 60 * 1000,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // Same as session cookie (30 days)
   },
   size: 64,
   ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
@@ -35,12 +41,18 @@ const {
 });
 
 export function csrfMiddleware(req: Request, res: Response, next: NextFunction): void {
+  // Skip CSRF for webhooks (they use signature verification)
   if (req.path.startsWith('/api/webhooks/')) {
     return next();
   }
   
   // Skip CSRF for initial token endpoint (used after login/register)
   if (req.path === '/api/csrf-token-init') {
+    return next();
+  }
+  
+  // Skip CSRF for login and register (chicken-and-egg: can't get CSRF token without session)
+  if (req.path === '/api/auth/login' || req.path === '/api/auth/register') {
     return next();
   }
   
@@ -51,10 +63,28 @@ export function csrfMiddleware(req: Request, res: Response, next: NextFunction):
           path: req.path,
           method: req.method,
           ip: req.ip,
+          sessionID: req.sessionID,
+          hasSession: !!req.session,
+          userId: req.session?.userId,
         });
-        return res.status(403).json({ 
-          message: 'Ошибка безопасности. Пожалуйста, обновите страницу и попробуйте снова.' 
-        });
+        
+        // Check if user has a valid session
+        if (req.session && req.session.userId) {
+          // Valid session but invalid CSRF token - likely token expired
+          // Generate new token and return it in response
+          const newToken = generateCsrfToken(req, res);
+          return res.status(403).json({ 
+            message: 'Токен безопасности устарел. Попробуйте ещё раз.',
+            csrfToken: newToken
+          });
+        } else {
+          // No valid session - clear session cookie and return 401
+          res.clearCookie('sessionId');
+          res.clearCookie('csrf-token');
+          return res.status(401).json({ 
+            message: 'Сессия истекла. Пожалуйста, войдите снова.' 
+          });
+        }
       }
       return next(err);
     }

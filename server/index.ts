@@ -14,6 +14,7 @@ import { csrfMiddleware, csrfTokenEndpoint } from "./middleware/csrf";
 import { logger } from "./utils/logger";
 import { pool } from "./db";
 import { startDataRetentionScheduler } from "./scheduler";
+import { authenticateToken } from "./auth";
 
 const app = express();
 
@@ -109,18 +110,18 @@ app.use(express.urlencoded({
   
   app.use('/api', generalApiLimiter);
   
-  // Initial CSRF token endpoint (no CSRF protection, used after login/register)
-  app.get('/api/csrf-token-init', csrfTokenEndpoint);
-  
+  // Webhooks without CSRF protection (they use signature verification)
   const webhooksRoutes = await import('./routes/webhooks.routes');
   app.use('/api/webhooks', webhooksRoutes.default);
   
-  // Apply CSRF protection to all /api routes (except webhooks and csrf-token-init)
+  // CSRF token endpoint (requires authentication but NO CSRF token)
+  // This is used to get initial token after login/register
+  app.get('/api/csrf-token-init', authenticateToken, csrfTokenEndpoint);
+  
+  // Apply CSRF protection to ALL /api routes (registered AFTER this middleware)
   app.use('/api', csrfMiddleware);
   
-  // Protected CSRF token refresh endpoint (with CSRF protection)
-  app.get('/api/csrf-token', csrfTokenEndpoint);
-  
+  // Register all API routes AFTER CSRF middleware (so they are protected)
   const server = await registerRoutes(app);
 
   app.use(errorHandler);

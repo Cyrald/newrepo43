@@ -12,8 +12,9 @@ export const corsMiddleware = cors({
         ].filter(Boolean);
         
         if (!origin) {
-          logger.warn('CORS rejected request without Origin header in production');
-          callback(null, false);
+          // No Origin header means same-origin request - allow it
+          // This is normal for server-to-server requests and some browser scenarios
+          callback(null, true);
           return;
         }
         

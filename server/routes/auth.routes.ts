@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import { invalidateAllUserSessions } from "../utils/sessionManager";
 import { validatePassword } from "../utils/sanitize";
 import { initializeSessionWithUser } from "../utils/sessionUtils";
+import { generateCsrfToken } from "../middleware/csrf";
 
 const router = Router();
 
@@ -57,6 +58,10 @@ router.post("/register", registerLimiter, async (req, res) => {
     // This GUARANTEES session is saved to DB before response
     await initializeSessionWithUser(req, user.id, roleNames);
     
+    // Generate CSRF token AFTER session is fully initialized
+    // This ensures token is tied to the correct sessionId
+    const csrfToken = generateCsrfToken(req, res);
+    
     logRegistration({
       email: user.email,
       userId: user.id,
@@ -75,6 +80,7 @@ router.post("/register", registerLimiter, async (req, res) => {
         bonusBalance: user.bonusBalance,
         roles: roleNames,
       },
+      csrfToken,
     });
   } catch (error) {
     logger.error('Session initialization failed during registration', { error });
@@ -113,6 +119,10 @@ router.post("/login", authLimiter, async (req, res) => {
     // This GUARANTEES session is saved to DB before response
     await initializeSessionWithUser(req, user.id, roleNames);
     
+    // Generate CSRF token AFTER session is fully initialized
+    // This ensures token is tied to the correct sessionId
+    const csrfToken = generateCsrfToken(req, res);
+    
     logLoginAttempt({
       email: user.email,
       userId: user.id,
@@ -132,6 +142,7 @@ router.post("/login", authLimiter, async (req, res) => {
         bonusBalance: user.bonusBalance,
         roles: roleNames,
       },
+      csrfToken,
     });
   } catch (error) {
     logger.error('Session initialization failed during login', { error });

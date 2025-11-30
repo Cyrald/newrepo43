@@ -34,47 +34,10 @@ function getCsrfTokenFromCookie(): string | null {
   return csrfCookie ? csrfCookie.split('=')[1] : null;
 }
 
-/**
- * Wait for session to be ready before making protected requests
- * Prevents race condition where session might not be persisted to DB yet
- */
-async function waitForSessionReady(maxAttempts = 3) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await fetch('/api/session-status', {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.isReady) {
-          return true;
-        }
-      }
-    } catch (error) {
-      console.warn(`Session ready check attempt ${attempt} failed:`, error);
-    }
-    
-    // Wait before retry: 50ms, 100ms, 200ms
-    if (attempt < maxAttempts) {
-      const delayMs = 50 * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-  }
-  
-  // Return true even if checks failed - don't block requests
-  return true;
-}
-
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  // For protected requests, ensure session is ready first
-  if (options.method && options.method !== 'GET' && !endpoint.includes('/auth/')) {
-    await waitForSessionReady();
-  }
-
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
@@ -93,35 +56,6 @@ async function fetchApi<T>(
     headers,
     credentials: 'include',
   });
-
-  // If 403 (CSRF error), try to refresh token and retry once
-  if (response.status === 403 && options.method && options.method !== 'GET') {
-    try {
-      // Get fresh CSRF token with retry
-      await fetch('/api/csrf-token-init', { credentials: 'include' });
-      
-      // Small delay to ensure token is set in cookie
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      // Retry the request with new token
-      const newCsrfToken = getCsrfTokenFromCookie();
-      if (newCsrfToken) {
-        headers["x-csrf-token"] = newCsrfToken;
-        
-        const retryResponse = await fetch(endpoint, {
-          ...options,
-          headers,
-          credentials: 'include',
-        });
-        
-        if (retryResponse.ok) {
-          return retryResponse.json();
-        }
-      }
-    } catch (retryError) {
-      console.error('Failed to retry request after CSRF refresh:', retryError);
-    }
-  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({
