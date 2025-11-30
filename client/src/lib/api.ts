@@ -57,6 +57,32 @@ async function fetchApi<T>(
     credentials: 'include',
   });
 
+  // If 403 (CSRF error), try to refresh token and retry once
+  if (response.status === 403 && options.method && options.method !== 'GET') {
+    try {
+      // Get fresh CSRF token
+      await fetch('/api/csrf-token-init', { credentials: 'include' });
+      
+      // Retry the request with new token
+      const newCsrfToken = getCsrfTokenFromCookie();
+      if (newCsrfToken) {
+        headers["x-csrf-token"] = newCsrfToken;
+        
+        const retryResponse = await fetch(endpoint, {
+          ...options,
+          headers,
+          credentials: 'include',
+        });
+        
+        if (retryResponse.ok) {
+          return retryResponse.json();
+        }
+      }
+    } catch (retryError) {
+      console.error('Failed to retry request after CSRF refresh:', retryError);
+    }
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({
       message: "Произошла ошибка",
