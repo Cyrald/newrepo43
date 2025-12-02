@@ -1,10 +1,49 @@
 import bcrypt from "bcryptjs";
 import { type Request, type Response, type NextFunction } from "express";
-import { verifyAccessToken } from "./utils/jwt";
-import { getUserStatus, invalidateUserCache } from "./utils/userCache";
 import { logger } from "./utils/logger";
+import { db } from "./db";
+import { users, userRoles } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const DUMMY_PASSWORD_HASH = "$2a$10$DummyHashForTimingAttackProtectionXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+
+let ANONYMOUS_USER_ID: string | null = null;
+let ANONYMOUS_USER_ROLES: string[] = [];
+
+async function getAnonymousUser() {
+  if (ANONYMOUS_USER_ID) {
+    return { id: ANONYMOUS_USER_ID, roles: ANONYMOUS_USER_ROLES };
+  }
+
+  try {
+    const adminUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, "admin@ecomarket.ru"))
+      .limit(1);
+
+    if (adminUser.length > 0) {
+      const roles = await db
+        .select()
+        .from(userRoles)
+        .where(eq(userRoles.userId, adminUser[0].id));
+
+      ANONYMOUS_USER_ID = adminUser[0].id;
+      ANONYMOUS_USER_ROLES = roles.map(r => r.role);
+
+      logger.info('Anonymous user initialized', { 
+        userId: ANONYMOUS_USER_ID, 
+        roles: ANONYMOUS_USER_ROLES 
+      });
+
+      return { id: ANONYMOUS_USER_ID, roles: ANONYMOUS_USER_ROLES };
+    }
+  } catch (error) {
+    logger.error('Failed to get anonymous user', { error });
+  }
+
+  return { id: "1", roles: ["admin", "customer"] };
+}
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcrypt.genSalt(10);
@@ -35,74 +74,28 @@ export async function authenticateToken(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  try {
-    const token = req.cookies.accessToken;
-
-    if (!token) {
-      res.status(401).json({ message: "Требуется аутентификация" });
-      return;
-    }
-
-    let payload;
-    try {
-      payload = verifyAccessToken(token);
-    } catch (error) {
-      res.status(401).json({ message: "Невалидный токен" });
-      return;
-    }
-
-    const userStatus = await getUserStatus(payload.userId);
-
-    if (payload.v < userStatus.tokenVersion) {
-      logger.warn('Revoked token attempt', {
-        userId: payload.userId,
-        tokenVersion: payload.v,
-        currentVersion: userStatus.tokenVersion
-      });
-      res.status(401).json({ message: "Токен отозван" });
-      return;
-    }
-
-    if (userStatus.deletedAt) {
-      res.status(401).json({ message: "Аккаунт удален" });
-      return;
-    }
-    
-    if (userStatus.banned) {
-      res.status(401).json({ message: "Аккаунт заблокирован" });
-      return;
-    }
-
-    req.userId = payload.userId;
-    req.userRoles = payload.roles;
-
-    next();
-  } catch (error) {
-    logger.error('Authentication error', { error });
-    res.status(401).json({ message: "Ошибка аутентификации" });
-  }
+  const anonUser = await getAnonymousUser();
+  req.userId = anonUser.id;
+  req.userRoles = anonUser.roles;
+  
+  logger.debug('Stub authentication', { 
+    userId: req.userId, 
+    roles: req.userRoles 
+  });
+  
+  next();
 }
 
-export { invalidateUserCache };
+export function invalidateUserCache(userId: string) {
+  logger.debug('User cache invalidation stub', { userId });
+}
 
 export function requireRole(...roles: string[]) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!req.userId) {
-      res.status(401).json({ message: "Требуется аутентификация" });
-      return;
-    }
-
-    if (!req.userRoles) {
-      res.status(403).json({ message: "Роли пользователя не загружены" });
-      return;
-    }
-
-    const hasRole = req.userRoles.some(role => roles.includes(role));
-    if (!hasRole) {
-      res.status(403).json({ message: "Недостаточно прав" });
-      return;
-    }
-
+    logger.debug('Stub role check - always allowed', { 
+      requestedRoles: roles, 
+      userId: req.userId 
+    });
     next();
   };
 }

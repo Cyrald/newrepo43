@@ -26,35 +26,6 @@ export class ApiError extends Error {
   }
 }
 
-let isRefreshing = false;
-let refreshPromise: Promise<void> | null = null;
-
-async function refreshAccessToken(): Promise<void> {
-  if (isRefreshing && refreshPromise) {
-    return refreshPromise;
-  }
-
-  isRefreshing = true;
-  refreshPromise = fetch('/api/auth/refresh', {
-    method: 'POST',
-    credentials: 'include',
-  }).then(async (response) => {
-    if (!response.ok) {
-      isRefreshing = false;
-      refreshPromise = null;
-      throw new Error('Failed to refresh token');
-    }
-    isRefreshing = false;
-    refreshPromise = null;
-  }).catch((error) => {
-    isRefreshing = false;
-    refreshPromise = null;
-    throw error;
-  });
-
-  return refreshPromise;
-}
-
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -74,37 +45,6 @@ async function fetchApi<T>(
     headers,
     credentials: 'include',
   });
-
-  if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/register') && !endpoint.includes('/auth/refresh')) {
-    try {
-      await refreshAccessToken();
-      
-      const retryHeaders: Record<string, string> = {
-        ...(options.headers as Record<string, string>),
-      };
-      
-      if (!isFormData) {
-        retryHeaders["Content-Type"] = "application/json";
-      }
-      
-      const retryResponse = await fetch(endpoint, {
-        ...options,
-        headers: retryHeaders,
-        credentials: 'include',
-      });
-
-      if (!retryResponse.ok) {
-        const errorData = await retryResponse.json().catch(() => ({
-          message: "Произошла ошибка",
-        }));
-        throw new ApiError(retryResponse.status, errorData.message || "Произошла ошибка");
-      }
-
-      return retryResponse.json();
-    } catch (error) {
-      throw new ApiError(401, "Сессия истекла. Пожалуйста, войдите снова.");
-    }
-  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({

@@ -49,20 +49,6 @@ export const userRoles = pgTable("user_roles", {
   userIdIdx: index("user_roles_user_id_idx").on(table.userId),
 }));
 
-export const refreshTokens = pgTable("refresh_tokens", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
-  jti: varchar("jti", { length: 64 }).notNull().unique(),
-  expiresAt: timestamp("expires_at").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  userAgent: text("user_agent"),
-  ipAddress: text("ip_address"),
-}, (table) => ({
-  userIdIdx: index("refresh_tokens_user_id_idx").on(table.userId),
-  jtiIdx: index("refresh_tokens_jti_idx").on(table.jti),
-  expiresAtIdx: index("refresh_tokens_expires_at_idx").on(table.expiresAt),
-}));
-
 // ============================================
 // CATEGORIES & PRODUCTS
 // ============================================
@@ -344,19 +330,11 @@ export const usersRelations = relations(users, ({ many }) => ({
   wishlistItems: many(wishlistItems),
   comparisonItems: many(comparisonItems),
   supportMessages: many(supportMessages),
-  refreshTokens: many(refreshTokens),
 }));
 
 export const userRolesRelations = relations(userRoles, ({ one }) => ({
   user: one(users, {
     fields: [userRoles.userId],
-    references: [users.id],
-  }),
-}));
-
-export const refreshTokensRelations = relations(refreshTokens, ({ one }) => ({
-  user: one(users, {
-    fields: [refreshTokens.userId],
     references: [users.id],
   }),
 }));
@@ -436,11 +414,6 @@ export const insertUserSchema = createInsertSchema(users, {
 });
 
 export const insertUserRoleSchema = createInsertSchema(userRoles).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertRefreshTokenSchema = createInsertSchema(refreshTokens).omit({
   id: true,
   createdAt: true,
 });
@@ -652,9 +625,6 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 
 export type UserRole = typeof userRoles.$inferSelect;
 export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
-
-export type RefreshToken = typeof refreshTokens.$inferSelect;
-export type InsertRefreshToken = z.infer<typeof insertRefreshTokenSchema>;
 
 export type Category = typeof categories.$inferSelect;
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
