@@ -1,0 +1,98 @@
+Сейчас сохраню всю информацию о проблеме и продолжу анализ в новом контексте.
+
+
+Show 5 more
+
+Opened client/src/providers/auth-provider.tsx
+
+Decided on ErrorBoundary root cause (8 seconds)
+Я прочитал файлы состояния и ключевые файлы проекта. Теперь вижу проблему!
+
+В client/src/lib/queryClient.ts на строке 131 установлена глобальная настройка:
+
+queryFn: getQueryFn({ on401: "throw" })
+
+Это означает, что при 401 ошибке выбрасывается исключение, которое ловит ErrorBoundary. Мне нужно проверить, как работают хуки для разных страниц:
+
+
+Show 3 more
+
+Searched for "Find hooks used for cart, wishlist, and user profile data fetching (useCart, useWishlist, useMe)"
+
+Determined queryFn implementation impact (6 seconds)
+Теперь вижу, что все хуки используют кастомные queryFn. Мне нужно проверить, как реализованы cartApi.get, wishlistApi.get и authApi.me:
+
+
+Show 2 more
+
+Opened client/src/lib/api.ts
+
+Decided on error handling strategy (16 seconds)
+Отлично! Я нашел потенциальную проблему в client/src/lib/api.ts!
+
+На строках 165-168 при неудаче обновления токена происходит:
+
+window.location.href = "/login";  // Редирект
+throw new ApiError(401, "Сессия истекла", "SESSION_EXPIRED");  // И БРОСАЕТСЯ ОШИБКА!
+
+Это создаёт ошибку, которую ловит ErrorBoundary перед редиректом. Но сначала давайте проверим логи, чтобы увидеть, что именно происходит:
+
+Checked console and system logs
+
+Decided on component debugging approach (7 seconds)
+ОТЛИЧНО! Теперь вижу реальную проблему в логах! Это НЕ проблема с токенами или API. Ошибка в самом компоненте:
+
+"Cannot read properties of undefined (reading 'length')"
+at AdminDashboardPage (dashboard-page.tsx:432:24)
+
+Давайте проверим эту страницу и остальные проблемные:
+
+
+Read the entire file
+
+Opened client/src/pages/admin/dashboard-page.tsx
+
+Investigated API response for recentOrders (5 seconds)
+НАШЁЛ ПРОБЛЕМУ! На строке 177 в dashboard-page.tsx:
+
+{recentOrders.length} новых заказов
+
+Переменная recentOrders на строке 43 определена как data.recentOrders, но если API не возвращает это поле, то recentOrders будет undefined.
+
+Давайте проверим, что возвращает API:
+
+
+Show 4 more
+
+Opened server/routes/admin.routes.ts
+
+Decided on API data mismatch resolution (9 seconds)
+ПРОБЛЕМА НАЙДЕНА!!!
+
+Сервер возвращает (строки 36-42):
+
+{
+  totalUsers,
+  totalProducts,
+  totalOrders,
+  totalRevenue,
+  pendingOrders,
+}
+
+НО клиент ожидает (из adminApi.getStats):
+
+{
+  totalRevenue, revenueChange,  // ❌ revenueChange отсутствует!
+  totalOrders, ordersChange,    // ❌ ordersChange отсутствует!
+  totalCustomers, customersChange, // ❌ totalCustomers вместо totalUsers!
+  totalProducts, productsChange,   // ❌ productsChange отсутствует!
+  recentOrders,                    // ❌ recentOrders отсутствует!
+}
+
+Клиент пытается прочитать recentOrders.length, но сервер вообще не возвращает recentOrders! Теперь проверим cart и wishlist:
+
+
+Executed rg -l 'router\.get\(.*["\'"'"']\/.*cart' server/routes
+
+Executed rg -l 'router\.get\(.*["\'"'"']\/.*wishlist' server/routes
+Agent encountered an error while running, we are investigating the issue.
